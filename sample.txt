@@ -1,0 +1,77 @@
+REPORT zflc_datagenlog_report.
+DATA : lv_posdate TYPE zdatagen_logging-date_posted,
+       lv_lines   TYPE i,
+       lv_po      TYPE zdatagen_logging-transaction_type. " VALUE '%PO%'.
+DATA : it_fcat TYPE slis_t_fieldcat_alv .
+DATA : wa_fcat LIKE LINE OF it_fcat .
+DATA : lt_po    TYPE RANGE OF ekko-ebeln,
+       ls_po    LIKE LINE OF lt_po,
+       lt_prod  TYPE RANGE OF aufk-aufnr,
+       lt_so    TYPE RANGE OF vbak-vbeln,
+       ls_so    LIKE LINE OF lt_so,
+       ls_prod  LIKE LINE OF lt_prod,
+       lt_poval TYPE TABLE OF zdatagen_logging.
+
+DATA lt_fun TYPE TABLE OF rseul_fun.
+DATA : it_exclude         TYPE slis_t_extab,
+       wa_exclude         TYPE slis_extab,
+       list_tab           TYPE TABLE OF abaplist,
+       lv_count           TYPE i,
+       lt_zdemo_data_temp TYPE TABLE OF zdemo_data,
+       ls_zdemo_data_temp TYPE zdemo_data,
+       lt_zdemo_data      TYPE TABLE OF zdemo_data,
+       lv_date            TYPE btcsdate.
+SELECTION-SCREEN BEGIN OF BLOCK a1 WITH FRAME TITLE TEXT-001.
+  SELECT-OPTIONS : s_date FOR lv_posdate OBLIGATORY.
+SELECTION-SCREEN END OF BLOCK a1.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-002.
+  PARAMETERS : p_po    RADIOBUTTON GROUP rb1  DEFAULT 'X',
+               p_prod  RADIOBUTTON GROUP rb1,
+               p_so    RADIOBUTTON GROUP rb1,
+               p_all   RADIOBUTTON GROUP rb1,
+               p_daily RADIOBUTTON GROUP rb1.
+SELECTION-SCREEN END OF BLOCK b1.
+
+AT SELECTION-SCREEN .
+  IF p_po EQ 'X'.
+    lv_po = '%PO%'.
+  ELSEIF p_prod EQ 'X'.
+    lv_po = 'PROD'.
+  ELSEIF p_so EQ 'X'.
+    lv_po = 'SO'.
+  ELSEIF p_all EQ 'X'.
+*    lv_po = ' '.
+  ENDIF.
+
+
+START-OF-SELECTION.
+  IF p_daily EQ 'X'.
+    IF s_date-low GT sy-datum.
+      s_date-low = sy-datum.
+    ENDIF.
+    IF s_date-high GT sy-datum.
+      s_date-high = sy-datum.
+    ENDIF.
+    IF s_date-high IS INITIAL.
+      s_date-high = s_date-low.
+    ENDIF.
+    SELECT * FROM zdemo_data INTO TABLE lt_zdemo_data WHERE dateposted_str BETWEEN s_date-low AND s_date-high.
+    DELETE lt_zdemo_data WHERE status EQ 'S' OR status EQ 'E' OR status EQ 'P'. "P for predictive Accounting
+    IF lt_zdemo_data[] IS INITIAL.
+      MESSAGE 'Hurray!! There are no Missed records' TYPE 'S'.
+    ELSE. " run the main datagen report for the dates given.
+      DESCRIBE TABLE lt_zdemo_data LINES lv_count.
+      WRITE : lv_count,'records to be processed'.NEW-LINE.
+      lt_zdemo_data_temp[] = lt_zdemo_data[].
+      DELETE ADJACENT DUPLICATES FROM lt_zdemo_data_temp COMPARING dateposted_str.
+      WRITE :' Program execution in background for below missing days'. NEW-LINE.
+      LOOP AT lt_zdemo_data_temp INTO ls_zdemo_data_temp.
+        WRITE :/ ls_zdemo_data_temp-dateposted_str.
+      ENDLOOP.
+*Execute below report in background
+      PERFORM background_job_schedule.
+      PERFORM clear_memory.
+    ENDIF.
+  ELSEIF p_all EQ 'X'.
+    SELECT * FROM zdatagen_logging INTO TABLE @DATA(lt_log)
